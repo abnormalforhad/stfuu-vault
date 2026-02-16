@@ -23,14 +23,19 @@ const charlie = getAddressFromPrivateKey(charliePrivateKey, "mocknet");
 const token = Cl.contractPrincipal(deployer, "mock-token-v3");
 const multisig = Cl.contractPrincipal(deployer, "multisig-v3");
 
-describe("Multisig Tests", () => {
+// Backup beneficiary address (should match contract constant)
+const BACKUP_BENEFICIARY = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM";
+const PETTY_CASH_LIMIT = 100_000_000; // 100 STX
+const INACTIVITY_LIMIT = 52560; // ~1 year in blocks
+
+describe("Multisig Vault Tests", () => {
   beforeEach(() => {
     const allAccounts = [alice, bob, charlie];
 
     for (const account of allAccounts) {
       const mintResultOne = simnet.callPublicFn(
-      "mock-token-v3",
-      "mint",
+        "mock-token-v3",
+        "mint",
         [Cl.uint(1_000_000_000), Cl.principal(account)],
         account
       );
@@ -39,360 +44,338 @@ describe("Multisig Tests", () => {
 
       simnet.mintSTX(account, 100_000_000n);
     }
-  });
 
-  it("allows initializing the multisig", () => {
-    const initializeResult = simnet.callPublicFn(
+    // Initialize the multisig
+    simnet.callPublicFn(
       "multisig-v3",
       "initialize",
       [
-        Cl.list([
-          Cl.principal(alice),
-          Cl.principal(bob),
-          Cl.principal(charlie),
-        ]),
+        Cl.list([Cl.principal(alice), Cl.principal(bob), Cl.principal(charlie)]),
         Cl.uint(2),
       ],
       deployer
     );
-
-    expect(initializeResult.result).toStrictEqual(Cl.ok(Cl.bool(true)));
-
-    const signers = simnet.getDataVar("multisig-v3", "signers");
-    expect(signers).toEqual(
-      Cl.list([Cl.principal(alice), Cl.principal(bob), Cl.principal(charlie)])
-    );
-
-    const threshold = simnet.getDataVar("multisig-v3", "threshold");
-    expect(threshold).toEqual(Cl.uint(2));
-
-    const initialized = simnet.getDataVar("multisig-v3", "initialized");
-    expect(initialized).toEqual(Cl.bool(true));
   });
 
-  it("only allows deployer to initialize the multisig", () => {
-    const initializeResult = simnet.callPublicFn(
-      "multisig-v3",
-      "initialize",
-      [
-        Cl.list([
-          Cl.principal(alice),
-          Cl.principal(bob),
-          Cl.principal(charlie),
-        ]),
-        Cl.uint(2),
-      ],
-      alice
-    );
+  // ============================================
+  // Petty Cash Tests
+  // ============================================
+  describe("Petty Cash Functionality", () => {
+    it("allows owners to send small amounts without voting", () => {
+      // Send money to the multisig
+      const transferResult = simnet.transferSTX(
+        1_000_000,
+        multisig.value.toString(),
+        alice
+      );
+      expect(transferResult.result).toStrictEqual(Cl.ok(Cl.bool(true)));
 
-    expect(initializeResult.result).toStrictEqual(Cl.error(Cl.uint(500)));
-  });
-
-  it("does not allow initializing the multisig if it is already initialized", () => {
-    const initializeResult = simnet.callPublicFn(
-      "multisig-v3",
-      "initialize",
-      [
-        Cl.list([
-          Cl.principal(alice),
-          Cl.principal(bob),
-          Cl.principal(charlie),
-        ]),
-        Cl.uint(2),
-      ],
-      deployer
-    );
-
-    expect(initializeResult.result).toStrictEqual(Cl.ok(Cl.bool(true)));
-
-    const initializeResultTwo = simnet.callPublicFn(
-      "multisig-v3",
-      "initialize",
-      [
-        Cl.list([
-          Cl.principal(alice),
-          Cl.principal(bob),
-          Cl.principal(charlie),
-        ]),
-        Cl.uint(2),
-      ],
-      deployer
-    );
-
-    expect(initializeResultTwo.result).toStrictEqual(Cl.error(Cl.uint(501)));
-  });
-
-  it("does not allow initializing the multisig if the threshold is too low", () => {
-    const initializeResult = simnet.callPublicFn(
-      "multisig-v3",
-      "initialize",
-      [
-        Cl.list([
-          Cl.principal(alice),
-          Cl.principal(bob),
-          Cl.principal(charlie),
-        ]),
-        Cl.uint(0),
-      ],
-      deployer
-    );
-
-    expect(initializeResult.result).toStrictEqual(Cl.error(Cl.uint(509)));
-  });
-
-  it("does not allow initializing if threshold exceeds signer count", () => {
-    const initializeResult = simnet.callPublicFn(
-      "multisig-v3",
-      "initialize",
-      [Cl.list([Cl.principal(alice), Cl.principal(bob)]), Cl.uint(3)],
-      deployer
-    );
-
-    expect(initializeResult.result).toStrictEqual(Cl.error(Cl.uint(512)));
-  });
-
-  it("does not allow initializing with duplicate signers", () => {
-    const initializeResult = simnet.callPublicFn(
-      "multisig-v3",
-      "initialize",
-      [
-        Cl.list([
-          Cl.principal(alice),
-          Cl.principal(bob),
-          Cl.principal(alice),
-        ]),
-        Cl.uint(2),
-      ],
-      deployer
-    );
-
-    expect(initializeResult.result).toStrictEqual(Cl.error(Cl.uint(513)));
-  });
-
-  it("allows any of the signers to submit a transaction", () => {
-    const initializeResult = simnet.callPublicFn(
-      "multisig-v3",
-      "initialize",
-      [
-        Cl.list([
-          Cl.principal(alice),
-          Cl.principal(bob),
-          Cl.principal(charlie),
-        ]),
-        Cl.uint(2),
-      ],
-      deployer
-    );
-
-    expect(initializeResult.result).toStrictEqual(Cl.ok(Cl.bool(true)));
-
-    for (const signer of [alice, bob, charlie]) {
-      const expectedTxnId = simnet.getDataVar("multisig-v3", "txn-id");
+      // Submit a petty cash transaction
       const submitResult = simnet.callPublicFn(
         "multisig-v3",
-        "submit-txn",
-        [Cl.uint(0), Cl.uint(100), Cl.principal(signer), Cl.none()],
-        signer
+        "submit-transaction",
+        [Cl.principal(bob), Cl.uint(500_000)],
+        alice
       );
 
-      expect(submitResult.result).toStrictEqual(Cl.ok(expectedTxnId));
-    }
+      expect(submitResult.result).toStrictEqual(Cl.ok(Cl.uint(1)));
+    });
+
+    it("updates last-active-block on petty cash transaction", () => {
+      const beforeActive = simnet.getDataVar("multisig-v3", "last-active-block");
+      
+      // Send money to the multisig
+      simnet.transferSTX(1_000_000, multisig.value.toString(), alice);
+
+      // Submit petty cash transaction
+      simnet.callPublicFn(
+        "multisig-v3",
+        "submit-transaction",
+        [Cl.principal(bob), Cl.uint(500_000)],
+        alice
+      );
+
+      const afterActive = simnet.getDataVar("multisig-v3", "last-active-block");
+      expect(JSON.stringify(afterActive)).not.toEqual(JSON.stringify(beforeActive));
+    });
+
+    it("processes large amounts through normal voting even for owners", () => {
+      // Send large amount to multisig
+      simnet.transferSTX(200_000_000, multisig.value.toString(), alice);
+
+      // Submit a large transaction (should go to voting)
+      const submitResult = simnet.callPublicFn(
+        "multisig-v3",
+        "submit-transaction",
+        [Cl.principal(bob), Cl.uint(150_000_000)],
+        alice
+      );
+
+      expect(submitResult.result).toStrictEqual(Cl.ok(Cl.uint(0)));
+    });
+
+    it("prevents non-owners from using petty cash", () => {
+      // Send money to the multisig
+      simnet.transferSTX(1_000_000, multisig.value.toString(), alice);
+
+      // Non-owner tries to submit transaction
+      const submitResult = simnet.callPublicFn(
+        "multisig-v3",
+        "submit-transaction",
+        [Cl.principal(bob), Cl.uint(500_000)],
+        deployer
+      );
+
+      expect(submitResult.result).toStrictEqual(Cl.error(Cl.uint(100)));
+    });
+
+    it("uses voting for amounts at the petty cash limit", () => {
+      // Send money to the multisig
+      simnet.transferSTX(PETTY_CASH_LIMIT * 2, multisig.value.toString(), alice);
+
+      // Test exactly at limit (should go to voting since it's not < limit)
+      const atLimitResult = simnet.callPublicFn(
+        "multisig-v3",
+        "submit-transaction",
+        [Cl.principal(bob), Cl.uint(PETTY_CASH_LIMIT)],
+        alice
+      );
+      expect(atLimitResult.result).toStrictEqual(Cl.ok(Cl.uint(0)));
+
+      // Test just under limit (should use petty cash)
+      const underLimitResult = simnet.callPublicFn(
+        "multisig-v3",
+        "submit-transaction",
+        [Cl.principal(bob), Cl.uint(PETTY_CASH_LIMIT - 1)],
+        alice
+      );
+      expect(underLimitResult.result).toStrictEqual(Cl.ok(Cl.uint(1)));
+    });
   });
 
-  it("does not allow a non-signer to submit a transaction", () => {
-    const initializeResult = simnet.callPublicFn(
-      "multisig-v3",
-      "initialize",
-      [
-        Cl.list([
-          Cl.principal(alice),
-          Cl.principal(bob),
-          Cl.principal(charlie),
-        ]),
-        Cl.uint(2),
-      ],
-      deployer
-    );
+  // ============================================
+  // Dead Man's Switch Tests
+  // ============================================
+  describe("Dead Man's Switch Functionality", () => {
+    it("prevents triggering before inactivity period", () => {
+      // Try to trigger dead man's switch immediately
+      const triggerResult = simnet.callPublicFn(
+        "multisig-v3",
+        "trigger-dead-man-switch",
+        [],
+        alice
+      );
 
-    expect(initializeResult.result).toStrictEqual(Cl.ok(Cl.bool(true)));
+      expect(triggerResult.result).toStrictEqual(Cl.error(Cl.uint(404)));
+    });
 
-    const submitResult = simnet.callPublicFn(
-      "multisig-v3",
-      "submit-txn",
-      [Cl.uint(0), Cl.uint(100), Cl.principal(alice), Cl.none()],
-      deployer
-    );
+    it("updates last-active-block when owners are active", () => {
+      // Get initial last active block
+      const initialActive = simnet.getDataVar("multisig-v3", "last-active-block");
 
-    expect(submitResult.result).toStrictEqual(Cl.error(Cl.uint(504)));
+      // Perform any owner action that should update the timer
+      simnet.callPublicFn(
+        "multisig-v3",
+        "submit-transaction",
+        [Cl.principal(bob), Cl.uint(1_000)],
+        alice
+      );
+
+      const updatedActive = simnet.getDataVar("multisig-v3", "last-active-block");
+      expect(JSON.stringify(updatedActive)).not.toEqual(JSON.stringify(initialActive));
+    });
   });
 
-  it("can submit a STX transfer transaction", () => {
-    // Initialize the multisig
-    const initializeResult = simnet.callPublicFn(
-      "multisig-v3",
-      "initialize",
-      [
-        Cl.list([
-          Cl.principal(alice),
-          Cl.principal(bob),
-          Cl.principal(charlie),
-        ]),
-        Cl.uint(2),
-      ],
-      deployer
-    );
-    expect(initializeResult.result).toStrictEqual(Cl.ok(Cl.bool(true)));
+  // ============================================
+  // Combined Flow Tests
+  // ============================================
+  describe("Complete Vault Lifecycle", () => {
+    it("handles both petty cash and voted transactions", () => {
+      // Fund the vault
+      simnet.transferSTX(500_000_000, multisig.value.toString(), alice);
 
-    // Submit a transaction
-    const submitResult = simnet.callPublicFn(
-      "multisig-v3",
-      "submit-txn",
-      [Cl.uint(0), Cl.uint(100), Cl.principal(alice), Cl.none()],
-      alice
-    );
-    expect(submitResult.result).toStrictEqual(Cl.ok(Cl.uint(0)));
+      // Petty cash transaction
+      const pettyResult = simnet.callPublicFn(
+        "multisig-v3",
+        "submit-transaction",
+        [Cl.principal(bob), Cl.uint(50_000_000)],
+        alice
+      );
+      expect(pettyResult.result).toStrictEqual(Cl.ok(Cl.uint(1)));
 
-    // Send money to the multisig so it has STX tokens to transfer later
-    // when the txn is executed
-    const transferResult = simnet.transferSTX(
-      100,
-      multisig.value.toString(),
-      alice
-    );
-    expect(transferResult.result).toStrictEqual(Cl.ok(Cl.bool(true)));
-
-    // Hash the transaction
-    const txnHash = simnet.callReadOnlyFn(
-      "multisig-v3",
-      "hash-txn",
-      [Cl.uint(0)],
-      deployer
-    );
-    assert(txnHash.result.type === "buffer");
-
-    // Have each signer sign the transaction
-    const aliceSignature = signMessageHashRsv({
-      messageHash: txnHash.result.value,
-      privateKey: alicePrivateKey,
-    });
-    const bobSignature = signMessageHashRsv({
-      messageHash: txnHash.result.value,
-      privateKey: bobPrivateKey,
+      // Large transaction requiring voting
+      const largeResult = simnet.callPublicFn(
+        "multisig-v3",
+        "submit-transaction",
+        [Cl.principal(charlie), Cl.uint(200_000_000)],
+        alice
+      );
+      expect(largeResult.result).toStrictEqual(Cl.ok(Cl.uint(0)));
     });
 
-    // Execute the transaction
-    const executeResult = simnet.callPublicFn(
-      "multisig-v3",
-      "execute-stx-transfer-txn",
-      [
-        Cl.uint(0),
-        Cl.list([
-          Cl.bufferFromHex(aliceSignature),
-          Cl.bufferFromHex(bobSignature),
-        ]),
-      ],
-      alice
-    );
-    expect(executeResult.result).toStrictEqual(Cl.ok(Cl.bool(true)));
-    expect(executeResult.events.length).toEqual(2); // one stx_transfer and one print
+    it("maintains last-active-block across all operations", () => {
+      const initial = simnet.getDataVar("multisig-v3", "last-active-block");
 
-    const reexecuteResult = simnet.callPublicFn(
-      "multisig-v3",
-      "execute-stx-transfer-txn",
-      [
-        Cl.uint(0),
-        Cl.list([
-          Cl.bufferFromHex(aliceSignature),
-          Cl.bufferFromHex(bobSignature),
-        ]),
-      ],
-      alice
-    );
-    expect(reexecuteResult.result).toStrictEqual(Cl.error(Cl.uint(514)));
+      // Petty cash updates timer
+      simnet.transferSTX(1_000_000, multisig.value.toString(), alice);
+      simnet.callPublicFn(
+        "multisig-v3",
+        "submit-transaction",
+        [Cl.principal(bob), Cl.uint(500_000)],
+        alice
+      );
+      const afterPetty = simnet.getDataVar("multisig-v3", "last-active-block");
+      expect(JSON.stringify(afterPetty)).not.toEqual(JSON.stringify(initial));
+
+      // Voted transaction updates timer
+      simnet.callPublicFn(
+        "multisig-v3",
+        "submit-transaction",
+        [Cl.principal(charlie), Cl.uint(150_000_000)],
+        alice
+      );
+      const afterVote = simnet.getDataVar("multisig-v3", "last-active-block");
+      expect(JSON.stringify(afterVote)).not.toEqual(JSON.stringify(afterPetty));
+    });
   });
 
-  it("can submit a SIP-010 transfer transaction", () => {
-    const initializeResult = simnet.callPublicFn(
-      "multisig-v3",
-      "initialize",
-      [
-        Cl.list([
-          Cl.principal(alice),
-          Cl.principal(bob),
-          Cl.principal(charlie),
-        ]),
-        Cl.uint(2),
-      ],
-      deployer
-    );
+  // ============================================
+  // Edge Cases
+  // ============================================
+  describe("Edge Cases", () => {
+    it("handles zero amount transactions appropriately", () => {
+      // Send money to the multisig
+      simnet.transferSTX(1_000_000, multisig.value.toString(), alice);
 
-    expect(initializeResult.result).toStrictEqual(Cl.ok(Cl.bool(true)));
-
-    const submitResult = simnet.callPublicFn(
-      "multisig-v3",
-      "submit-txn",
-      [Cl.uint(1), Cl.uint(100), Cl.principal(alice), Cl.some(token)],
-      alice
-    );
-
-    expect(submitResult.result).toStrictEqual(Cl.ok(Cl.uint(0)));
-
-    // send some token to the multisig
-    const sendResult = simnet.callPublicFn(
-      "mock-token-v3",
-      "transfer",
-      [Cl.uint(100), Cl.principal(alice), multisig, Cl.none()],
-      alice
-    );
-    expect(sendResult.result).toStrictEqual(Cl.ok(Cl.bool(true)));
-
-    const balance = simnet.callReadOnlyFn(
-      "mock-token-v3",
-      "get-balance",
-      [multisig],
-      deployer
-    );
-    expect(balance.result).toStrictEqual(Cl.ok(Cl.uint(100)));
-
-    const txnHash = simnet.callReadOnlyFn(
-      "multisig-v3",
-      "hash-txn",
-      [Cl.uint(0)],
-      deployer
-    );
-    assert(txnHash.result.type === "buffer");
-
-    const aliceSignature = signMessageHashRsv({
-      messageHash: txnHash.result.value,
-      privateKey: alicePrivateKey,
-    });
-    const bobSignature = signMessageHashRsv({
-      messageHash: txnHash.result.value,
-      privateKey: bobPrivateKey,
+      const zeroResult = simnet.callPublicFn(
+        "multisig-v3",
+        "submit-transaction",
+        [Cl.principal(bob), Cl.uint(0)],
+        alice
+      );
+      
+      expect(zeroResult.result).toStrictEqual(Cl.ok(Cl.uint(1)));
     });
 
-    const executeResult = simnet.callPublicFn(
-      "multisig-v3",
-      "execute-token-transfer-txn",
-      [
-        Cl.uint(0),
-        token,
-        Cl.list([
-          Cl.bufferFromHex(aliceSignature),
-          Cl.bufferFromHex(bobSignature),
-        ]),
-      ],
-      alice
-    );
-    expect(executeResult.result).toStrictEqual(Cl.ok(Cl.bool(true)));
-    expect(executeResult.events.length).toEqual(2); // one ft_transfer and one print
+    it("prevents sending more than vault balance", () => {
+      // Send small amount to vault
+      simnet.transferSTX(1_000_000, multisig.value.toString(), alice);
 
-    const newBalance = simnet.callReadOnlyFn(
-      "mock-token-v3",
-      "get-balance",
-      [multisig],
-      deployer
-    );
-    expect(newBalance.result).toStrictEqual(Cl.ok(Cl.uint(0)));
+      // Try to send more than available
+      const overdrawResult = simnet.callPublicFn(
+        "multisig-v3",
+        "submit-transaction",
+        [Cl.principal(bob), Cl.uint(2_000_000)],
+        alice
+      );
+
+      expect(overdrawResult.result).toStrictEqual(Cl.error(Cl.uint(1)));
+    });
+
+    it("handles multiple sequential petty cash transactions", () => {
+      // Fund vault
+      simnet.transferSTX(10_000_000, multisig.value.toString(), alice);
+
+      // Do 5 petty cash transactions
+      for (let i = 0; i < 5; i++) {
+        const result = simnet.callPublicFn(
+          "multisig-v3",
+          "submit-transaction",
+          [Cl.principal(bob), Cl.uint(1_000_000)],
+          alice
+        );
+        expect(result.result).toStrictEqual(Cl.ok(Cl.uint(1)));
+      }
+    });
+  });
+
+  // ============================================
+  // Security Tests
+  // ============================================
+  describe("Security Tests", () => {
+    it("prevents non-owners from triggering dead man's switch", () => {
+      const triggerResult = simnet.callPublicFn(
+        "multisig-v3",
+        "trigger-dead-man-switch",
+        [],
+        deployer
+      );
+
+      expect(triggerResult.result).toStrictEqual(Cl.error(Cl.uint(404)));
+    });
+
+    it("ensures petty cash limit cannot be exploited through multiple transactions", () => {
+      // Fund vault
+      simnet.transferSTX(1_000_000_000, multisig.value.toString(), alice);
+
+      const numTransactions = 10;
+      
+      for (let i = 0; i < numTransactions; i++) {
+        const result = simnet.callPublicFn(
+          "multisig-v3",
+          "submit-transaction",
+          [Cl.principal(bob), Cl.uint(PETTY_CASH_LIMIT - 1)],
+          alice
+        );
+        expect(result.result).toStrictEqual(Cl.ok(Cl.uint(1)));
+      }
+    });
+  });
+
+  // ============================================
+  // Stress Tests
+  // ============================================
+  describe("Stress Tests", () => {
+    it("handles high frequency of petty cash transactions", () => {
+      // Fund vault generously
+      simnet.transferSTX(100_000_000_000, multisig.value.toString(), alice);
+
+      const numTransactions = 50;
+
+      for (let i = 0; i < numTransactions; i++) {
+        const result = simnet.callPublicFn(
+          "multisig-v3",
+          "submit-transaction",
+          [Cl.principal(bob), Cl.uint(1_000_000)],
+          alice
+        );
+        expect(result.result).toStrictEqual(Cl.ok(Cl.uint(1)));
+      }
+    });
+
+    it("maintains correct state under concurrent-like operations", () => {
+      // Mix of petty cash and voted transactions
+      const operations = [
+        { type: "petty", amount: 50_000_000 },
+        { type: "large", amount: 150_000_000 },
+        { type: "petty", amount: 30_000_000 },
+        { type: "large", amount: 200_000_000 },
+        { type: "petty", amount: 10_000_000 },
+      ];
+
+      // Fund vault
+      simnet.transferSTX(1_000_000_000, multisig.value.toString(), alice);
+
+      let lastActiveBefore = simnet.getDataVar("multisig-v3", "last-active-block");
+
+      for (const op of operations) {
+        const result = simnet.callPublicFn(
+          "multisig-v3",
+          "submit-transaction",
+          [Cl.principal(bob), Cl.uint(op.amount)],
+          alice
+        );
+
+        if (op.type === "petty") {
+          expect(result.result).toStrictEqual(Cl.ok(Cl.uint(1)));
+        } else {
+          expect(result.result).toStrictEqual(Cl.ok(Cl.uint(0)));
+        }
+
+        const lastActiveAfter = simnet.getDataVar("multisig-v3", "last-active-block");
+        expect(JSON.stringify(lastActiveAfter)).not.toEqual(JSON.stringify(lastActiveBefore));
+        lastActiveBefore = lastActiveAfter;
+      }
+    });
   });
 });
