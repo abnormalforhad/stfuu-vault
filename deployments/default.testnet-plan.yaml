@@ -10,9 +10,9 @@ plan:
       transactions:
         - requirement-publish:
             contract-id: SP3FBR2AGK5H9QBDH3EEN6DF8EK8JY7RX8QJ5SVTE.sip-010-trait-ft-standard
-            remap-sender: ST324V9NVACZX30K57W1DRP8BCSCJAJN6B0H7PQ3J
+            remap-sender: ST3ZPNR0THWRX74EC853MWDE7V4EN5F1SEAMGY0SX
             remap-principals:
-              SP3FBR2AGK5H9QBDH3EEN6DF8EK8JY7RX8QJ5SVTE: ST324V9NVACZX30K57W1DRP8BCSCJAJN6B0H7PQ3J
+              SP3FBR2AGK5H9QBDH3EEN6DF8EK8JY7RX8QJ5SVTE: ST3ZPNR0THWRX74EC853MWDE7V4EN5F1SEAMGY0SX
             cost: 8400
             path: "./.cache/requirements/SP3FBR2AGK5H9QBDH3EEN6DF8EK8JY7RX8QJ5SVTE.sip-010-trait-ft-standard.clar"
             clarity-version: 1
@@ -21,14 +21,14 @@ plan:
       transactions:
         - contract-publish:
             contract-name: mock-token-v3
-            expected-sender: ST324V9NVACZX30K57W1DRP8BCSCJAJN6B0H7PQ3J
+            expected-sender: ST3ZPNR0THWRX74EC853MWDE7V4EN5F1SEAMGY0SX
             cost: 11810
             path: contracts/mock-token-v3.clar
             anchor-block-only: true
             clarity-version: 3
         - contract-publish:
             contract-name: multisig-v3
-            expected-sender: ST324V9NVACZX30K57W1DRP8BCSCJAJN6B0H7PQ3J
+            expected-sender: ST3ZPNR0THWRX74EC853MWDE7V4EN5F1SEAMGY0SX
             cost: 17920
             path: contracts/multisig-v3.clar
             anchor-block-only: true
