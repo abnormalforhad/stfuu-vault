@@ -6,7 +6,7 @@ telemetry = false
 cache_dir = './.cache'
 
 [[project.requirements]]
-contract_id = 'SP3FBR2AGK5H9QBDH3EEN6DF8EK8JY7RX8QJ5SVTE.sip-010-trait-ft-standard'
+contract_id = 'ST2XV9R7FNJE9ZZYKSR70453N1YT4QDT67AE6Z2PE.sip-010-trait-ft-standard'
 [contracts.mock-token-v3]
 path = 'contracts/mock-token-v3.clar'
 clarity_version = 3
